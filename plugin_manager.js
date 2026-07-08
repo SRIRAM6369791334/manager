@@ -58,15 +58,15 @@ function isPrivateIP(ip) {
     if (ip.startsWith('fe80:')) return true;
     // IPv6 unique local
     if (ip.startsWith('fc') || ip.startsWith('fd')) return true;
-    // IPv4 dotted quad
+    // IPv4 dotted quad — fail-closed: unrecognized input is blocked
     const parts = ip.split('.').map(Number);
-    if (parts.length !== 4) return false;
+    if (parts.length !== 4 || parts.some(p => isNaN(p))) return true;
     if (parts[0] === 10) return true;
     if (parts[0] === 127) return true;
     if (parts[0] === 169 && parts[1] === 254) return true;
     if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
     if (parts[0] === 192 && parts[1] === 168) return true;
-    return false;
+    return false; // valid public IPv4 — allowed
 }
 
 function validateInt(val, min, max) {
@@ -814,6 +814,14 @@ if (!process.env.DASHBOARD_PASSWORD) {
 }
 const sessions = new Map();
 const SESSION_TTL = 12 * 60 * 60 * 1000; // 12 hours
+// Periodic expired-session GC (every 30 minutes) to prevent unbounded memory growth.
+// Per-request expiry checks remain the authoritative gate; this is just a sweep.
+setInterval(() => {
+    const now = Date.now();
+    for (const [token, session] of sessions) {
+        if (now > session.expiresAt) sessions.delete(token);
+    }
+}, 30 * 60 * 1000);
 
 const server = http.createServer((req, res) => {
     // API Routes
@@ -1351,26 +1359,47 @@ const server = http.createServer((req, res) => {
                         if (!url || !container_selector || !fields || !output_file_path) {
                             sendJson(res, { error: 'Missing required fields' }, 400); return;
                         }
-                        try {
-                            const parsed = new URL(url);
-                            if (parsed.protocol !== 'https:') { sendJson(res, { error: 'Only HTTPS URLs allowed' }, 400); return; }
-                            // Resolve hostname to IP to prevent DNS rebinding SSRF
-                            let resolvedIP = parsed.hostname;
-                            try { resolvedIP = dns.lookupSync(parsed.hostname, { family: 4 }).address; } catch (_) { /* keep hostname if unresolvable */ }
-                            if (isPrivateIP(resolvedIP)) { sendJson(res, { error: 'Cannot scrape private/internal URLs' }, 403); return; }
-                            const outputDir = path.dirname(path.resolve(output_file_path));
-                            const allowedPrefix = (process.env.USERPROFILE || process.env.HOME || '').toLowerCase();
-                            if (!outputDir.toLowerCase().startsWith(allowedPrefix)) {
-                                sendJson(res, { error: 'Output path must be under your user profile' }, 403);
-                                return;
-                            }
-                        } catch (e) { sendJson(res, { error: 'Invalid URL' }, 400); return; }
-                        scrapeWebpageHelper(url, container_selector, fields, output_file_path, username, password).then(result => {
-                            auditAction('scrape', { url, count: result.count }, req);
-                            sendJson(res, { success: true, result });
-                        }).catch(err => {
-                            sendError(res, err.message);
-                        });
+                        // Async IIFE so we can await DNS lookup before scrapeWebpageHelper
+                        (async () => {
+                            try {
+                                const parsed = new URL(url);
+                                if (parsed.protocol !== 'https:') { sendJson(res, { error: 'Only HTTPS URLs allowed' }, 400); return; }
+
+                                // ── SSRF guard: resolve hostname to IP at request time ──
+                                // This prevents trivial DNS-rebinding SSRF (attacker-controlled
+                                // hostname that alternates between public and private IPs).
+                                // Order matters: DNS lookup → isPrivateIP check → axios.get.
+                                //
+                                // ⚠ Residual risk: a fully rebinding-proof solution would pin
+                                //   the resolved IP for the outbound connection via a custom
+                                //   axios `lookup` option. This request-time check is a pragmatic
+                                //   mitigation, not a complete defense against an attacker who
+                                //   controls authoritative DNS and can flip records between the
+                                //   lookup and the actual TCP connection (TOCTOU).
+                                let resolvedIP;
+                                try {
+                                    const dnsResult = await dns.promises.lookup(parsed.hostname, { family: 4 });
+                                    resolvedIP = dnsResult.address;
+                                } catch (_) {
+                                    sendJson(res, { error: 'Cannot resolve hostname — blocked' }, 403);
+                                    return;
+                                }
+                                if (isPrivateIP(resolvedIP)) {
+                                    sendJson(res, { error: 'Cannot scrape private/internal URLs' }, 403);
+                                    return;
+                                }
+
+                                const outputDir = path.dirname(path.resolve(output_file_path));
+                                const allowedPrefix = (process.env.USERPROFILE || process.env.HOME || '').toLowerCase();
+                                if (!outputDir.toLowerCase().startsWith(allowedPrefix)) {
+                                    sendJson(res, { error: 'Output path must be under your user profile' }, 403);
+                                    return;
+                                }
+                                const result = await scrapeWebpageHelper(url, container_selector, fields, output_file_path, username, password);
+                                auditAction('scrape', { url, count: result.count }, req);
+                                sendJson(res, { success: true, result });
+                            } catch (e) { sendError(res, e.message); }
+                        })();
                     } else if (req.url === '/api/arena/start') {
                         const { topic, rounds } = data;
                         const config = getConfig();
