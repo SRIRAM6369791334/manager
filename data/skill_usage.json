@@ -1,0 +1,12 @@
+{
+  "cavekit": {
+    "count": 7,
+    "firstTriggered": "2026-07-08T10:27:45.987Z",
+    "lastTriggered": "2026-07-08T10:29:47.887Z"
+  },
+  "loop-factory": {
+    "count": 3,
+    "firstTriggered": "2026-07-08T10:28:54.078Z",
+    "lastTriggered": "2026-07-08T10:29:47.927Z"
+  }
+}

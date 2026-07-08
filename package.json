@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node plugin_manager.js",
-    "test": "node tests/e2e_test.py"
+    "test": "python tests/e2e_test.py"
   },
   "keywords": [
     "antigravity",
@@ -24,6 +24,7 @@
     "archiver": "^8.0.0",
     "axios": "^1.18.1",
     "cheerio": "^1.2.0",
-    "dotenv": "^17.4.2"
+    "dotenv": "^17.4.2",
+    "node-cron": "^4.6.0"
   }
 }

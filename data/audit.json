@@ -1,0 +1,21 @@
+[
+  {
+    "action": "settings_update",
+    "details": {
+      "keyUpdated": false,
+      "mcpUpdated": true
+    },
+    "ip": "::1",
+    "time": "2026-07-08T10:25:08.000Z"
+  },
+  {
+    "action": "settings_update",
+    "details": {
+      "keyUpdated": false,
+      "mcpUpdated": true,
+      "registryUpdated": true
+    },
+    "ip": "::1",
+    "time": "2026-07-08T10:29:47.580Z"
+  }
+]

@@ -109,6 +109,8 @@ function loadViewData(view) {
     else if (view === 'online-store') fetchStore();
     else if (view === 'macros') fetchMacros();
     else if (view === 'memory') fetchMemory();
+    else if (view === 'mcp') fetchMCPHealth();
+    else if (view === 'artifacts') fetchArtifacts();
     else if (view === 'system-controls') initSystemControlsView();
     else if (view === 'subagents-arena') initArenaView();
     else if (view === 'settings') loadSettingsView();
@@ -204,19 +206,30 @@ async function fetchTasks() {
         const container = document.getElementById('tasks-container');
         container.innerHTML = '';
         if (data.length === 0) {
-            container.innerHTML = `<div style="color:#64748b; font-size:12px;">No tasks scheduled.</div>`;
+            container.innerHTML = '<div style="color:#64748b; font-size:12px;">No tasks scheduled.</div>';
         }
         data.forEach(item => {
             const div = document.createElement('div');
             div.className = 'list-item';
-            div.innerHTML = `
-                <div>
-                    <div class="list-item-title">${item.name}</div>
-                    <div class="list-item-desc">${item.command}</div>
-                    <div style="font-size:10px; color:var(--theme-primary); margin-top:4px;">&#8635; ${item.schedule}</div>
-                </div>
-                <button class="btn btn-danger" onclick="deleteTask('${item.id}')">Delete</button>
-            `;
+            const title = document.createElement('div');
+            title.className = 'list-item-title';
+            title.textContent = item.name;
+            const desc = document.createElement('div');
+            desc.className = 'list-item-desc';
+            desc.textContent = item.command;
+            const sched = document.createElement('div');
+            sched.style.cssText = 'font-size:10px; color:var(--theme-primary); margin-top:4px;';
+            sched.textContent = '\u21B5 ' + item.schedule;
+            const left = document.createElement('div');
+            left.appendChild(title);
+            left.appendChild(desc);
+            left.appendChild(sched);
+            const delBtn = document.createElement('button');
+            delBtn.className = 'btn btn-danger';
+            delBtn.textContent = 'Delete';
+            delBtn.onclick = () => deleteTask(item.id);
+            div.appendChild(left);
+            div.appendChild(delBtn);
             container.appendChild(div);
         });
     } catch (e) { console.error(e); }
@@ -243,7 +256,71 @@ async function createTask() {
     } catch(e) { alert("Failed to create task"); }
 }
 
+async function fetchTaskHistory() {
+    try {
+        const res = await fetch('/api/task-history');
+        const data = await res.json();
+        const container = document.getElementById('task-history-container');
+        if (!container) return;
+        container.innerHTML = '';
+        if (data.length === 0) {
+            container.innerHTML = '<div style="color:#64748b; font-size:12px;">No task history yet.</div>'; return;
+        }
+        data.slice(0, 50).forEach(h => {
+            const d = document.createElement('div');
+            d.className = 'list-item';
+            d.style.cssText = 'flex-direction:column; align-items:flex-start;';
+            const header = document.createElement('div');
+            header.style.cssText = 'display:flex; justify-content:space-between; width:100%;';
+            const title = document.createElement('div');
+            title.className = 'list-item-title';
+            title.textContent = h.taskName;
+            const status = document.createElement('span');
+            status.style.color = h.exitCode === 0 ? '#39ff14' : '#ff4444';
+            status.textContent = h.exitCode === 0 ? 'SUCCESS' : 'FAILED';
+            header.appendChild(title);
+            header.appendChild(status);
+            const meta = document.createElement('div');
+            meta.className = 'list-item-desc';
+            meta.textContent = new Date(h.timestamp).toLocaleString() + ' | ' + h.command;
+            d.appendChild(header);
+            d.appendChild(meta);
+            if (h.stderr) {
+                const err = document.createElement('div');
+                err.style.cssText = 'color:#ff4444; font-size:11px; font-family:monospace; margin-top:4px;';
+                err.textContent = h.stderr.slice(0, 200);
+                d.appendChild(err);
+            }
+            container.appendChild(d);
+        });
+    } catch(e) { console.error(e); }
+}
+
+async function fetchAuditLog() {
+    try {
+        const res = await fetch('/api/audit');
+        const data = await res.json();
+        const container = document.getElementById('audit-log-container');
+        if (!container) return;
+        container.innerHTML = '';
+        if (data.length === 0) {
+            container.innerHTML = '<div style="color:#64748b; font-size:12px;">No audit entries yet.</div>'; return;
+        }
+        data.slice(0, 100).forEach(entry => {
+            const d = document.createElement('div');
+            d.className = 'list-item';
+            d.style.cssText = 'flex-direction:column; align-items:flex-start;';
+            const text = document.createElement('div');
+            text.style.cssText = 'font-size:12px; color:#e2e8f0; font-family:monospace;';
+            text.textContent = new Date(entry.time).toLocaleString() + ' [' + entry.action + '] ' + JSON.stringify(entry.details);
+            d.appendChild(text);
+            container.appendChild(d);
+        });
+    } catch(e) { console.error(e); }
+}
+
 async function deleteTask(id) {
+    if (!confirm('Delete this task?')) return;
     try {
         await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
         showNotification('TASK DELETED');
@@ -460,18 +537,31 @@ async function fetchBackups() {
         const res = await fetch('/api/backup');
         const backups = await res.json();
         const container = document.getElementById('backup-list');
+        container.innerHTML = '';
         if (backups.length === 0) {
             container.innerHTML = '<div style="color:#64748b;font-size:12px;">No backups yet. Create your first one!</div>';
             return;
         }
-        container.innerHTML = backups.map(b => `
-            <div class="list-item">
-                <div>
-                    <div class="list-item-title">${b.name}</div>
-                    <div class="list-item-desc">${b.date} &nbsp;|&nbsp; ${b.size}</div>
-                </div>
-                <button class="btn btn-danger" onclick="deleteBackup('${b.name}')">Delete</button>
-            </div>`).join('');
+        backups.forEach(b => {
+            const item = document.createElement('div');
+            item.className = 'list-item';
+            const left = document.createElement('div');
+            const title = document.createElement('div');
+            title.className = 'list-item-title';
+            title.textContent = b.name;
+            const desc = document.createElement('div');
+            desc.className = 'list-item-desc';
+            desc.textContent = b.date + ' | ' + b.size;
+            left.appendChild(title);
+            left.appendChild(desc);
+            const delBtn = document.createElement('button');
+            delBtn.className = 'btn btn-danger';
+            delBtn.textContent = 'Delete';
+            delBtn.onclick = () => deleteBackup(b.name);
+            item.appendChild(left);
+            item.appendChild(delBtn);
+            container.appendChild(item);
+        });
     } catch(e) { console.error(e); }
 }
 
@@ -494,6 +584,7 @@ async function createBackup() {
 }
 
 async function deleteBackup(name) {
+    if (!confirm('Delete backup: ' + name + '?')) return;
     try {
         await fetch(`/api/backup/${encodeURIComponent(name)}`, { method: 'DELETE' });
         showNotification('BACKUP DELETED');
@@ -506,18 +597,37 @@ async function fetchRules() {
     try {
         const res = await fetch('/api/rules');
         const data = await res.json();
-        const html = data.map(r => `
-            <div class="list-item" style="display:flex; justify-content:space-between; align-items:center;">
-                <div>
-                    <div class="list-item-title">${r.name.replace('.disabled', '')}</div>
-                    <div class="list-item-desc" style="white-space:pre-wrap; font-size:11px; max-height:40px; overflow:hidden;">${r.content.substring(0,60)}...</div>
-                </div>
-                <div>
-                    <button class="btn ${r.active ? 'btn-success' : ''}" onclick="toggleRule('${r.name}', !${r.active}, \`${r.content.replace(/`/g, '\\`')}\`)">${r.active ? 'Active' : 'Enable'}</button>
-                    <button class="btn btn-danger" onclick="deleteRule('${r.name}')">X</button>
-                </div>
-            </div>`).join('');
-        document.getElementById('rules-list').innerHTML = html;
+        const container = document.getElementById('rules-list');
+        container.innerHTML = '';
+        data.forEach(r => {
+            const item = document.createElement('div');
+            item.className = 'list-item';
+            item.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
+            const left = document.createElement('div');
+            const title = document.createElement('div');
+            title.className = 'list-item-title';
+            title.textContent = r.name.replace('.disabled', '');
+            const desc = document.createElement('div');
+            desc.className = 'list-item-desc';
+            desc.style.cssText = 'white-space:pre-wrap; font-size:11px; max-height:40px; overflow:hidden;';
+            desc.textContent = r.content.substring(0, 60) + '...';
+            left.appendChild(title);
+            left.appendChild(desc);
+            const right = document.createElement('div');
+            const toggleBtn = document.createElement('button');
+            toggleBtn.className = 'btn' + (r.active ? ' btn-success' : '');
+            toggleBtn.textContent = r.active ? 'Active' : 'Enable';
+            toggleBtn.onclick = () => toggleRule(r.name, !r.active, r.content);
+            const delBtn = document.createElement('button');
+            delBtn.className = 'btn btn-danger';
+            delBtn.textContent = 'X';
+            delBtn.onclick = () => deleteRule(r.name);
+            right.appendChild(toggleBtn);
+            right.appendChild(delBtn);
+            item.appendChild(left);
+            item.appendChild(right);
+            container.appendChild(item);
+        });
     } catch(e) { console.error(e); }
 }
 function openRuleForm() { document.getElementById('rule-form').style.display = 'block'; }
@@ -533,12 +643,14 @@ async function saveRule() {
     } catch(e) { console.error(e); }
 }
 async function toggleRule(name, active, content) {
+    if (!confirm('Toggle rule: ' + name + '?')) return;
     try {
         await fetch('/api/rules', { method: 'POST', body: JSON.stringify({ name, content, active }) });
         fetchRules(); showNotification('RULE UPDATED');
     } catch(e) { console.error(e); }
 }
 async function deleteRule(name) {
+    if (!confirm('Delete rule: ' + name + '?')) return;
     try {
         await fetch(`/api/rules/${encodeURIComponent(name)}`, { method: 'DELETE' });
         fetchRules(); showNotification('RULE DELETED');
@@ -550,15 +662,29 @@ async function fetchAgents() {
     try {
         const res = await fetch('/api/agents');
         const data = await res.json();
-        const html = data.map(a => `
-            <div class="list-item" style="display:flex; justify-content:space-between; align-items:center;">
-                <div>
-                    <div class="list-item-title">${a.name}</div>
-                    <div class="list-item-desc">${a.description}</div>
-                </div>
-                <button class="btn btn-danger" onclick="deleteAgent('${a.filename}')">Delete</button>
-            </div>`).join('');
-        document.getElementById('agents-list').innerHTML = html;
+        const container = document.getElementById('agents-list');
+        container.innerHTML = '';
+        data.forEach(a => {
+            const item = document.createElement('div');
+            item.className = 'list-item';
+            item.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
+            const left = document.createElement('div');
+            const title = document.createElement('div');
+            title.className = 'list-item-title';
+            title.textContent = a.name;
+            const desc = document.createElement('div');
+            desc.className = 'list-item-desc';
+            desc.textContent = a.description || '';
+            left.appendChild(title);
+            left.appendChild(desc);
+            const delBtn = document.createElement('button');
+            delBtn.className = 'btn btn-danger';
+            delBtn.textContent = 'Delete';
+            delBtn.onclick = () => deleteAgent(a.filename);
+            item.appendChild(left);
+            item.appendChild(delBtn);
+            container.appendChild(item);
+        });
     } catch(e) { console.error(e); }
 }
 async function createAgent() {
@@ -573,6 +699,7 @@ async function createAgent() {
     } catch(e) { console.error(e); }
 }
 async function deleteAgent(filename) {
+    if (!confirm('Delete agent: ' + filename + '?')) return;
     try {
         await fetch(`/api/agents/${encodeURIComponent(filename)}`, { method: 'DELETE' });
         fetchAgents(); showNotification('AGENT DELETED');
@@ -584,15 +711,29 @@ async function fetchStore() {
     try {
         const res = await fetch('/api/store/skills');
         const data = await res.json();
-        const html = data.map(s => `
-            <div class="list-item" style="display:flex; justify-content:space-between; align-items:center;">
-                <div>
-                    <div class="list-item-title">${s.name}</div>
-                    <div class="list-item-desc">${s.desc}</div>
-                </div>
-                <button class="btn btn-success" onclick="installSkill('${s.id}', '${s.name}', '${s.desc}')">Install</button>
-            </div>`).join('');
-        document.getElementById('store-list').innerHTML = html;
+        const container = document.getElementById('store-list');
+        container.innerHTML = '';
+        data.forEach(s => {
+            const item = document.createElement('div');
+            item.className = 'list-item';
+            item.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
+            const left = document.createElement('div');
+            const title = document.createElement('div');
+            title.className = 'list-item-title';
+            title.textContent = s.name;
+            const desc = document.createElement('div');
+            desc.className = 'list-item-desc';
+            desc.textContent = s.desc;
+            left.appendChild(title);
+            left.appendChild(desc);
+            const installBtn = document.createElement('button');
+            installBtn.className = 'btn btn-success';
+            installBtn.textContent = 'Install';
+            installBtn.onclick = () => installSkill(s.id, s.name, s.desc);
+            item.appendChild(left);
+            item.appendChild(installBtn);
+            container.appendChild(item);
+        });
     } catch(e) { console.error(e); }
 }
 async function installSkill(id, name, desc) {
@@ -607,15 +748,30 @@ async function fetchMacros() {
     try {
         const res = await fetch('/api/macros');
         const data = await res.json();
-        const html = data.map(m => `
-            <div class="list-item" style="display:flex; justify-content:space-between; align-items:center;">
-                <div>
-                    <div class="list-item-title">/${m.name}</div>
-                    <div class="list-item-desc" style="white-space:pre-wrap; font-size:11px;">${m.content.substring(0,50)}...</div>
-                </div>
-                <button class="btn btn-danger" onclick="deleteMacro('${m.filename}')">Delete</button>
-            </div>`).join('');
-        document.getElementById('macros-list').innerHTML = html;
+        const container = document.getElementById('macros-list');
+        container.innerHTML = '';
+        data.forEach(m => {
+            const item = document.createElement('div');
+            item.className = 'list-item';
+            item.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
+            const left = document.createElement('div');
+            const title = document.createElement('div');
+            title.className = 'list-item-title';
+            title.textContent = '/' + m.name;
+            const desc = document.createElement('div');
+            desc.className = 'list-item-desc';
+            desc.style.cssText = 'white-space:pre-wrap; font-size:11px;';
+            desc.textContent = m.content.substring(0, 50) + '...';
+            left.appendChild(title);
+            left.appendChild(desc);
+            const delBtn = document.createElement('button');
+            delBtn.className = 'btn btn-danger';
+            delBtn.textContent = 'Delete';
+            delBtn.onclick = () => deleteMacro(m.filename);
+            item.appendChild(left);
+            item.appendChild(delBtn);
+            container.appendChild(item);
+        });
     } catch(e) { console.error(e); }
 }
 async function createMacro() {
@@ -629,6 +785,7 @@ async function createMacro() {
     } catch(e) { console.error(e); }
 }
 async function deleteMacro(filename) {
+    if (!confirm('Delete macro: ' + filename + '?')) return;
     try {
         await fetch(`/api/macros/${encodeURIComponent(filename)}`, { method: 'DELETE' });
         fetchMacros(); showNotification('MACRO DELETED');
@@ -1059,6 +1216,218 @@ function escapeHtml(text) {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+}
+
+// ── Antigravity Features ─────────────────────────────────────
+
+async function fetchSkills() {
+    try {
+        const res = await fetch('/api/skills/enhanced');
+        const skills = await res.json();
+        const container = document.getElementById('skills-container');
+        container.innerHTML = '';
+        skills.forEach(s => {
+            const card = document.createElement('div');
+            card.className = 'card';
+            const scopeColor = s.scope === 'workspace' ? '#facc15' : '#00f0ff';
+            const overrideBadge = s.overriddenBy ? '<span style="color:#ff4444;font-size:9px;">(OVERRIDDEN)</span>' : (s.overrides ? '<span style="color:#39ff14;font-size:9px;">(ACTIVE)</span>' : '');
+            card.innerHTML = `
+                <div class='card-icon-area'><div class='icon-box'><svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div></div>
+                <div class='card-content'>
+                    <div class='card-title'>${escapeHtml(s.name)} ${overrideBadge}</div>
+                    <div style="font-size:11px; color:#94a3b8; margin-top:4px;">${escapeHtml(s.description)}</div>
+                    <div style="font-size:10px; margin-top:6px; display:flex; gap:10px;">
+                        <span style="color:${scopeColor};">⬤ ${s.scope.toUpperCase()}</span>
+                        <span style="color:var(--text-muted);">📄 ${s.tokenEstimate} tokens</span>
+                        ${s.effective === false ? '<span style="color:#ff4444;">✕ INACTIVE</span>' : '<span style="color:#39ff14;">✓ ACTIVE</span>'}
+                    </div>
+                </div>`;
+            container.appendChild(card);
+        });
+        // Load heatmap
+        fetchSkillHeatmap();
+    } catch (e) { console.error(e); }
+}
+
+async function fetchSkillLint() {
+    try {
+        const res = await fetch('/api/skills/lint');
+        const data = await res.json();
+        const container = document.getElementById('skill-lint-results');
+        container.innerHTML = '<h4 style="font-weight:300; margin-bottom:10px;">🔍 Description Lint Results</h4>';
+        const flagged = data.filter(d => d.warnings.length > 0);
+        if (flagged.length === 0) { container.innerHTML += '<div style="color:#39ff14; font-size:12px;">All descriptions look good!</div>'; return; }
+        flagged.forEach(f => {
+            const d = document.createElement('div');
+            d.className = 'list-item';
+            d.style.cssText = 'flex-direction:column; align-items:flex-start;';
+            d.innerHTML = `<div style="font-weight:bold;">${escapeHtml(f.skill)} <span style="color:${f.scope === 'workspace' ? '#facc15' : '#00f0ff'};font-size:10px;">[${f.scope.toUpperCase()}]</span></div>
+                <div style="font-size:11px; color:#94a3b8;">${escapeHtml(f.description)}</div>
+                <div style="font-size:11px; color:#ff4444; margin-top:4px;">${f.warnings.map(w => '⚠ ' + escapeHtml(w)).join('<br>')}</div>`;
+            container.appendChild(d);
+        });
+    } catch(e) { console.error(e); }
+}
+
+async function fetchSkillConflicts() {
+    try {
+        const res = await fetch('/api/skills/conflicts');
+        const data = await res.json();
+        const container = document.getElementById('skill-conflicts-results');
+        container.innerHTML = '<h4 style="font-weight:300; margin-bottom:10px;">⚡ Skill Conflicts</h4>';
+        if (data.length === 0) { container.innerHTML += '<div style="color:#39ff14; font-size:12px;">No conflicts detected.</div>'; return; }
+        data.forEach(c => {
+            const d = document.createElement('div');
+            d.className = 'list-item';
+            d.style.cssText = 'flex-direction:column; align-items:flex-start;';
+            const isDup = c.type === 'scope_duplicate';
+            d.innerHTML = `<div style="font-weight:bold;">${escapeHtml(c.a)} ↔ ${escapeHtml(c.b)}</div>
+                <div style="font-size:11px; color:#94a3b8;">${isDup ? 'Same name in different scope — ' + escapeHtml(c.winner) + ' wins' : c.similarity + '% description overlap'}</div>
+                <div style="font-size:10px; color:var(--text-muted);">${c.aScope} vs ${c.bScope}</div>`;
+            container.appendChild(d);
+        });
+    } catch(e) { console.error(e); }
+}
+
+async function testSkillMatch() {
+    const query = document.getElementById('match-query').value.trim();
+    if (!query) return;
+    try {
+        const res = await fetch('/api/skills/match', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query })
+        });
+        const data = await res.json();
+        const container = document.getElementById('match-results');
+        container.innerHTML = '<h4 style="font-weight:300; margin-bottom:10px;">🎯 Match Results</h4>';
+        if (data.length === 0) { container.innerHTML += '<div style="color:#64748b; font-size:12px;">No skills match.</div>'; return; }
+        data.slice(0, 10).forEach(m => {
+            const d = document.createElement('div');
+            d.className = 'list-item';
+            d.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
+            const scoreColor = m.score > 50 ? '#39ff14' : m.score > 20 ? '#facc15' : '#ff4444';
+            d.innerHTML = `<div>
+                    <div style="font-weight:bold;">${escapeHtml(m.skill)}</div>
+                    <div style="font-size:11px; color:#94a3b8;">${escapeHtml(m.description)}</div>
+                </div>
+                <div style="font-size:20px; font-weight:bold; color:${scoreColor};">${m.score}%</div>`;
+            container.appendChild(d);
+        });
+    } catch(e) { console.error(e); }
+}
+
+async function fetchMCPHealth() {
+    try {
+        const res = await fetch('/api/mcp/health');
+        const data = await res.json();
+        const container = document.getElementById('mcp-health-results');
+        container.innerHTML = '';
+        if (data.length === 0) { container.innerHTML = '<div style="color:#64748b; font-size:12px;">No MCP servers configured. Add them in Settings.</div>'; return; }
+        data.forEach(s => {
+            const d = document.createElement('div');
+            d.className = 'list-item';
+            const statusColor = s.status === 'connected' ? '#39ff14' : s.status === 'unreachable' ? '#ff4444' : '#facc15';
+            d.innerHTML = `<div>
+                    <div style="font-weight:bold;">${escapeHtml(s.name)}</div>
+                    <div style="font-size:11px; color:#94a3b8;">${escapeHtml(s.url)}</div>
+                </div>
+                <div style="font-size:12px; color:${statusColor};">${s.status.toUpperCase()}</div>`;
+            container.appendChild(d);
+        });
+    } catch(e) { console.error(e); }
+}
+
+async function fetchMCPMapping() {
+    try {
+        const res = await fetch('/api/skills/mcp-mapping');
+        const data = await res.json();
+        const container = document.getElementById('mcp-mapping-results');
+        container.innerHTML = '<h4 style="font-weight:300; margin-bottom:10px;">🔗 Skill ↔ MCP Mapping</h4>';
+        if (data.length === 0) { container.innerHTML += '<div style="color:#64748b; font-size:12px;">No skills reference MCP tools.</div>'; return; }
+        data.forEach(m => {
+            const d = document.createElement('div');
+            d.className = 'list-item';
+            d.style.cssText = 'flex-direction:column; align-items:flex-start;';
+            d.innerHTML = `<div style="font-weight:bold;">${escapeHtml(m.skill)} <span style="color:${m.scope === 'workspace' ? '#facc15' : '#00f0ff'};font-size:10px;">[${m.scope.toUpperCase()}]</span></div>
+                <div style="font-size:11px; color:#94a3b8;">${m.mcpTools.length > 0 ? '🔧 ' + m.mcpTools.map(t => escapeHtml(t)).join(', ') : '<em>No MCP tools referenced</em>'}</div>`;
+            container.appendChild(d);
+        });
+    } catch(e) { console.error(e); }
+}
+
+async function fetchArtifacts() {
+    try {
+        const res = await fetch('/api/artifacts');
+        const data = await res.json();
+        const container = document.getElementById('artifacts-container');
+        container.innerHTML = '';
+        if (data.error || data.length === 0) {
+            container.innerHTML = '<div style="color:#64748b; font-size:12px;">' + escapeHtml(data.error || 'No artifacts found.') + '</div>'; return;
+        }
+        const cats = [...new Set(data.map(a => a.category))];
+        cats.forEach(cat => {
+            const header = document.createElement('h4');
+            header.style.cssText = 'font-weight:300; margin:15px 0 10px 0; text-transform:uppercase; font-size:11px; color:var(--text-muted);';
+            header.textContent = cat;
+            container.appendChild(header);
+            data.filter(a => a.category === cat).forEach(a => {
+                const d = document.createElement('div');
+                d.className = 'list-item';
+                const isImage = a.name.match(/\.(png|jpg|jpeg|gif|svg)$/i);
+                d.innerHTML = `<div>
+                        <div style="font-weight:bold;">${escapeHtml(a.name)}</div>
+                        <div style="font-size:11px; color:#94a3b8;">${(a.size / 1024).toFixed(1)} KB · ${new Date(a.modified).toLocaleString()}</div>
+                    </div>
+                    ${isImage ? '<span style="color:#00f0ff;font-size:11px;">🖼 Preview</span>' : '<span style="color:#94a3b8;font-size:11px;">📄 ' + escapeHtml(a.name.split('.').pop()) + '</span>'}`;
+                container.appendChild(d);
+            });
+        });
+    } catch(e) { console.error(e); }
+}
+
+async function fetchSkillHeatmap() {
+    try {
+        const res = await fetch('/api/skills/heatmap');
+        const data = await res.json();
+        const entries = Object.entries(data).sort((a, b) => b[1].count - a[1].count);
+        const container = document.getElementById('skills-container');
+        if (entries.length === 0) return;
+        const heatEl = document.createElement('div');
+        heatEl.style.cssText = 'margin-top:20px; background:rgba(0,0,0,0.2); border:1px solid var(--panel-border); border-radius:12px; padding:20px;';
+        heatEl.innerHTML = '<h4 style="font-weight:300; margin-bottom:10px;">🔥 Skill Usage Heatmap</h4>';
+        entries.slice(0, 10).forEach(([name, info]) => {
+            const bar = document.createElement('div');
+            bar.style.cssText = 'display:flex; align-items:center; gap:10px; margin-bottom:6px;';
+            const label = document.createElement('div');
+            label.style.cssText = 'width:120px; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+            label.textContent = name;
+            const fill = document.createElement('div');
+            const pct = Math.min(info.count / 10, 1);
+            fill.style.cssText = `height:16px; background:var(--theme-primary); opacity:0.6; border-radius:4px; width:${pct * 200}px; transition:width 0.3s;`;
+            const count = document.createElement('div');
+            count.style.cssText = 'font-size:10px; color:var(--text-muted);';
+            count.textContent = info.count + 'x';
+            bar.appendChild(label);
+            bar.appendChild(fill);
+            bar.appendChild(count);
+            heatEl.appendChild(bar);
+        });
+        container.parentElement.appendChild(heatEl);
+    } catch(e) { /* silent */ }
+}
+
+async function saveMCPConfig() {
+    const val = document.getElementById('mcp-config-editor').value.trim();
+    let mcpServers;
+    try { mcpServers = JSON.parse(val); } catch(e) { alert('Invalid JSON'); return; }
+    try {
+        await fetch('/api/settings/config', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mcpServers })
+        });
+        showNotification('MCP CONFIG SAVED');
+        fetchMCPHealth();
+    } catch(e) { alert('Failed to save'); }
 }
 
 // Settings: Load and Save API Key
