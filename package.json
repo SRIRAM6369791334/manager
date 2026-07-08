@@ -10,13 +10,20 @@
     "start": "node plugin_manager.js",
     "test": "node tests/e2e_test.py"
   },
-  "keywords": ["antigravity", "dashboard", "plugin-manager", "ai", "gemini"],
+  "keywords": [
+    "antigravity",
+    "dashboard",
+    "plugin-manager",
+    "ai",
+    "gemini"
+  ],
   "author": "SRIRAM",
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
     "archiver": "^8.0.0",
     "axios": "^1.18.1",
-    "cheerio": "^1.2.0"
+    "cheerio": "^1.2.0",
+    "dotenv": "^17.4.2"
   }
 }
