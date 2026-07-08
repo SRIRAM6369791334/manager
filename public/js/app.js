@@ -346,31 +346,56 @@ function renderPlugins() {
     allPlugins.sort((a, b) => a.name.localeCompare(b.name)).forEach((p) => {
         const card = document.createElement('div');
         card.className = 'card ' + (p.active ? '' : ' inactive');
-        card.innerHTML = `
-            <div class='card-icon-area'>
-                <div class='icon-box'><svg viewBox='0 0 24 24'><rect x='3' y='4' width='18' height='16' rx='2'/><path d='M7 14l3-3 3 3 4-4'/><path d='M3 10h18'/></svg></div>
-                <div class='usage-stats'><div class='usage-label'>STATUS:</div><div class='usage-val'>${p.active ? 'HEALTHY' : 'STANDBY'}</div></div>
-            </div>
-            <div class='card-content'>
-                <div class='card-title'>${p.name}</div>
-                <div class='card-status-row'>
-                    <span class='status ${p.active ? "" : "inactive"}'>${p.active ? 'ACTIVE' : 'INACTIVE'}</span>
-                    <span class='storage'>v1.0.0</span>
-                </div>
-                <div class='chart-area'>
-                    <svg class='chart-svg' viewBox='0 0 100 30' preserveAspectRatio='none'>
-                        <polygon class='chart-fill' points='0,30 0,20 15,10 30,20 45,15 60,25 75,10 85,15 100,5 100,30' />
-                        <path class='chart-line' d='M0,20 L15,10 L30,20 L45,15 L60,25 L75,10 L85,15 L100,5' />
-                    </svg>
-                </div>
-            </div>
-            <div class='card-controls'>
-                <div class='toggle-wrapper' onclick='togglePlugin("${p.name}")'>
-                    <div class='toggle ${p.active ? 'active' : ''}'><span class='toggle-text-on'>ON</span></div>
-                    <span class='toggle-label-off'>OFF</span>
-                </div>
-            </div>
-        `;
+
+        const iconArea = document.createElement('div');
+        iconArea.className = 'card-icon-area';
+        iconArea.innerHTML = `<div class='icon-box'><svg viewBox='0 0 24 24'><rect x='3' y='4' width='18' height='16' rx='2'/><path d='M7 14l3-3 3 3 4-4'/><path d='M3 10h18'/></svg></div>
+            <div class='usage-stats'><div class='usage-label'>STATUS:</div><div class='usage-val'>${p.active ? 'HEALTHY' : 'STANDBY'}</div></div>`;
+        card.appendChild(iconArea);
+
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'card-content';
+        const title = document.createElement('div');
+        title.className = 'card-title';
+        title.textContent = p.name;
+        contentDiv.appendChild(title);
+
+        const statusRow = document.createElement('div');
+        statusRow.className = 'card-status-row';
+        const statusSpan = document.createElement('span');
+        statusSpan.className = 'status' + (p.active ? '' : ' inactive');
+        statusSpan.textContent = p.active ? 'ACTIVE' : 'INACTIVE';
+        statusRow.appendChild(statusSpan);
+        const versionSpan = document.createElement('span');
+        versionSpan.className = 'storage';
+        versionSpan.textContent = 'v1.0.0';
+        statusRow.appendChild(versionSpan);
+        contentDiv.appendChild(statusRow);
+
+        contentDiv.innerHTML += `<div class='chart-area'><svg class='chart-svg' viewBox='0 0 100 30' preserveAspectRatio='none'>
+            <polygon class='chart-fill' points='0,30 0,20 15,10 30,20 45,15 60,25 75,10 85,15 100,5 100,30' />
+            <path class='chart-line' d='M0,20 L15,10 L30,20 L45,15 L60,25 L75,10 L85,15 L100,5' /></svg></div>`;
+        card.appendChild(contentDiv);
+
+        const controls = document.createElement('div');
+        controls.className = 'card-controls';
+        const toggleWrapper = document.createElement('div');
+        toggleWrapper.className = 'toggle-wrapper';
+        const toggleInner = document.createElement('div');
+        toggleInner.className = 'toggle' + (p.active ? ' active' : '');
+        const toggleTextOn = document.createElement('span');
+        toggleTextOn.className = 'toggle-text-on';
+        toggleTextOn.textContent = 'ON';
+        toggleInner.appendChild(toggleTextOn);
+        toggleWrapper.appendChild(toggleInner);
+        const toggleLabelOff = document.createElement('span');
+        toggleLabelOff.className = 'toggle-label-off';
+        toggleLabelOff.textContent = 'OFF';
+        toggleWrapper.appendChild(toggleLabelOff);
+        controls.appendChild(toggleWrapper);
+        card.appendChild(controls);
+
+        toggleWrapper.addEventListener('click', () => togglePlugin(p.name));
         container.appendChild(card);
     });
 }
@@ -405,13 +430,24 @@ async function fetchSkills() {
         skills.forEach((s) => {
             const card = document.createElement('div');
             card.className = 'card';
-            card.innerHTML = `
-                <div class='card-icon-area'><div class='icon-box'><svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div></div>
-                <div class='card-content'>
-                    <div class='card-title'>${s.name}</div>
-                    <div style="font-size:11px; color:#94a3b8; margin-top:4px;">${s.description}</div>
-                </div>
-            `;
+
+            const iconArea = document.createElement('div');
+            iconArea.className = 'card-icon-area';
+            iconArea.innerHTML = `<div class='icon-box'><svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div></div>`;
+            card.appendChild(iconArea);
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'card-content';
+            const title = document.createElement('div');
+            title.className = 'card-title';
+            title.textContent = s.name;
+            contentDiv.appendChild(title);
+            const desc = document.createElement('div');
+            desc.style.cssText = 'font-size:11px; color:#94a3b8; margin-top:4px;';
+            desc.textContent = s.description;
+            contentDiv.appendChild(desc);
+            card.appendChild(contentDiv);
+
             container.appendChild(card);
         });
     } catch (e) { console.error(e); }

@@ -9,6 +9,8 @@ const archiver = require('archiver');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const cron = require('node-cron');
+const crypto = require('crypto');
+const dns = require('dns');
 
 const PLUGINS_DIR = path.join(process.env.USERPROFILE || process.env.HOME, '.gemini', 'config', 'plugins');
 const CONFIG_DIR  = path.join(process.env.USERPROFILE || process.env.HOME, '.gemini', 'config');
@@ -25,7 +27,8 @@ const PORT = 4000;
 // ── Security Helpers ──────────────────────────────────────────
 function safeJoin(base, userPath) {
     const resolved = path.resolve(base, userPath);
-    if (resolved.toLowerCase().startsWith(base.toLowerCase())) return resolved;
+    const normalizedBase = path.resolve(base);
+    if (resolved === normalizedBase || resolved.toLowerCase().startsWith(normalizedBase.toLowerCase() + path.sep)) return resolved;
     throw new Error('Path traversal blocked');
 }
 
@@ -46,16 +49,23 @@ function sendError(res, message, status = 500) {
     console.error(`[ERROR] ${status} — ${message}`);
 }
 
-function isPrivateIP(hostname) {
-    const parts = hostname.split('.').map(Number);
-    if (parts.length !== 4) return true;
+function isPrivateIP(ip) {
+    // IPv6 mapped IPv4
+    if (ip.startsWith('::ffff:')) ip = ip.slice(7);
+    // IPv6 loopback
+    if (ip === '::1') return true;
+    // IPv6 link-local
+    if (ip.startsWith('fe80:')) return true;
+    // IPv6 unique local
+    if (ip.startsWith('fc') || ip.startsWith('fd')) return true;
+    // IPv4 dotted quad
+    const parts = ip.split('.').map(Number);
+    if (parts.length !== 4) return false;
     if (parts[0] === 10) return true;
     if (parts[0] === 127) return true;
     if (parts[0] === 169 && parts[1] === 254) return true;
     if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
     if (parts[0] === 192 && parts[1] === 168) return true;
-    if (hostname === 'localhost') return true;
-    if (hostname.startsWith('::1')) return true;
     return false;
 }
 
@@ -63,10 +73,6 @@ function validateInt(val, min, max) {
     const n = parseInt(val, 10);
     if (isNaN(n) || n < min || n > max) throw new Error(`Value must be integer ${min}-${max}`);
     return n;
-}
-
-function escapeShellArg(arg) {
-    return `"${String(arg).replace(/[\\"]/g, '')}"`;
 }
 
 const AUDIT_LOG = path.join(DATA_DIR, 'audit.json');
@@ -799,6 +805,16 @@ const MIME_TYPES = {
     '.json': 'application/json'
 };
 
+// ── Auth: refuse hardcoded defaults ──────────────────────
+const PASSWORD = process.env.DASHBOARD_PASSWORD || crypto.randomBytes(4).toString('hex');
+if (!process.env.DASHBOARD_PASSWORD) {
+    console.log('\x1b[33m⚠ No DASHBOARD_PASSWORD in .env\x1b[0m');
+    console.log('\x1b[33m   Generated one-time password for this session: ' + PASSWORD + '\x1b[0m');
+    console.log('\x1b[33m   Set DASHBOARD_PASSWORD=your_password in .env to make it permanent.\x1b[0m');
+}
+const sessions = new Map();
+const SESSION_TTL = 12 * 60 * 60 * 1000; // 12 hours
+
 const server = http.createServer((req, res) => {
     // API Routes
     if (req.url.startsWith('/api/')) {
@@ -810,14 +826,16 @@ const server = http.createServer((req, res) => {
             res.writeHead(200); return res.end();
         }
 
-        const AUTH_TOKEN = process.env.AUTH_TOKEN || "antigravity_secure_token";
-        const PASSWORD = process.env.DASHBOARD_PASSWORD || "admin";
-
-        // CSRF check for state-changing methods
-        if (['POST', 'DELETE', 'PUT'].includes(req.method)) {
-            const origin = req.headers.origin || '';
-            const referer = req.headers.referer || '';
-            if (origin && !origin.startsWith('http://localhost')) {
+        // CSRF check for state-changing methods (strict: require Origin, exact match)
+        // Login is exempt (same-origin form POST with password as the shared secret)
+        if (['POST', 'DELETE', 'PUT'].includes(req.method) && req.url !== '/api/login') {
+            const origin = req.headers.origin;
+            const allowedOrigins = [process.env.APP_ORIGIN || 'http://localhost:4000'];
+            if (!origin) {
+                sendJson(res, { error: 'Origin header required' }, 403);
+                return;
+            }
+            if (!allowedOrigins.includes(origin)) {
                 sendJson(res, { error: 'Forbidden' }, 403);
                 return;
             }
@@ -839,7 +857,9 @@ const server = http.createServer((req, res) => {
                 try {
                     const data = JSON.parse(body);
                     if (data.password === PASSWORD) {
-                        sendJson(res, { success: true, token: AUTH_TOKEN });
+                        const token = crypto.randomBytes(32).toString('hex');
+                        sessions.set(token, { createdAt: Date.now(), expiresAt: Date.now() + SESSION_TTL });
+                        sendJson(res, { success: true, token });
                     } else {
                         sendJson(res, { success: false, error: 'Invalid password' }, 401);
                     }
@@ -850,10 +870,21 @@ const server = http.createServer((req, res) => {
             return;
         }
 
-        // Auth check — ALL routes including SSE require auth
+        // Auth check — ALL routes including SSE require valid session
         const authHeader = req.headers.authorization;
-        if (authHeader !== `Bearer ${AUTH_TOKEN}`) {
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
             sendJson(res, { error: 'Unauthorized' }, 401);
+            return;
+        }
+        const sessionToken = authHeader.slice(7);
+        const session = sessions.get(sessionToken);
+        if (!session) {
+            sendJson(res, { error: 'Unauthorized' }, 401);
+            return;
+        }
+        if (Date.now() > session.expiresAt) {
+            sessions.delete(sessionToken);
+            sendJson(res, { error: 'Session expired' }, 401);
             return;
         }
 
@@ -1152,7 +1183,11 @@ const server = http.createServer((req, res) => {
             req.on('end', () => {
                 try {
                     const data = body ? JSON.parse(body) : {};
-                    if (req.url === '/api/plugins') {
+                    if (req.url === '/api/logout') {
+                        const hdr = req.headers.authorization;
+                        if (hdr && hdr.startsWith('Bearer ')) sessions.delete(hdr.slice(7));
+                        sendJson(res, { success: true });
+                    } else if (req.url === '/api/plugins') {
                         updatePlugins(data.activePlugins || []);
                         auditAction('plugins_sync', { activeCount: (data.activePlugins || []).length }, req);
                         sendJson(res, { success: true });
@@ -1163,6 +1198,7 @@ const server = http.createServer((req, res) => {
                         tasksData.tasks.push(data);
                         writeJsonFile('tasks.json', tasksData);
                         reloadTaskScheduler();
+                        auditAction('task_created', { taskName: data.name, command: data.command, schedule: data.schedule }, req);
                         sendJson(res, { success: true, task: data });
                     } else if (req.url === '/api/git') {
                         const { command, repoPath, message } = data;
@@ -1318,7 +1354,10 @@ const server = http.createServer((req, res) => {
                         try {
                             const parsed = new URL(url);
                             if (parsed.protocol !== 'https:') { sendJson(res, { error: 'Only HTTPS URLs allowed' }, 400); return; }
-                            if (isPrivateIP(parsed.hostname)) { sendJson(res, { error: 'Cannot scrape private/internal URLs' }, 403); return; }
+                            // Resolve hostname to IP to prevent DNS rebinding SSRF
+                            let resolvedIP = parsed.hostname;
+                            try { resolvedIP = dns.lookupSync(parsed.hostname, { family: 4 }).address; } catch (_) { /* keep hostname if unresolvable */ }
+                            if (isPrivateIP(resolvedIP)) { sendJson(res, { error: 'Cannot scrape private/internal URLs' }, 403); return; }
                             const outputDir = path.dirname(path.resolve(output_file_path));
                             const allowedPrefix = (process.env.USERPROFILE || process.env.HOME || '').toLowerCase();
                             if (!outputDir.toLowerCase().startsWith(allowedPrefix)) {
@@ -1524,6 +1563,8 @@ function scheduleTask(task) {
     }
     const job = cron.schedule(cronExpr, () => {
         console.log(`[Scheduler] Running task: ${task.name} (${task.command})`);
+        const stubReq = { socket: { remoteAddress: 'scheduler' } };
+        auditAction('scheduled_task_exec', { taskName: task.name, command: task.command }, stubReq);
         execFile(process.platform === 'win32' ? 'cmd.exe' : 'sh', 
             [process.platform === 'win32' ? '/c' : '-c', task.command],
             { timeout: 30000, maxBuffer: 1024 * 1024 },
