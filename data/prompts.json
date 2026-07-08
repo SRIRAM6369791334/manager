@@ -1,0 +1,6 @@
+{
+  "prompts": [
+    { "id": "1", "title": "Code Review", "content": "Please review the following code and suggest improvements for performance and readability." },
+    { "id": "2", "title": "Generate Tests", "content": "Write unit tests for the provided functions." }
+  ]
+}

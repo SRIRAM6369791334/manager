@@ -1,0 +1,22 @@
+{
+  "name": "antigravity-dashboard",
+  "version": "1.0.0",
+  "description": "Antigravity Central Hub - AI plugin manager dashboard with git integration, task scheduling, web scraping, and system controls",
+  "main": "plugin_manager.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "start": "node plugin_manager.js",
+    "test": "node tests/e2e_test.py"
+  },
+  "keywords": ["antigravity", "dashboard", "plugin-manager", "ai", "gemini"],
+  "author": "SRIRAM",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "archiver": "^8.0.0",
+    "axios": "^1.18.1",
+    "cheerio": "^1.2.0"
+  }
+}
